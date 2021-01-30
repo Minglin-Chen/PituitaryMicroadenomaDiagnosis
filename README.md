@@ -15,9 +15,7 @@ This repository contains the source code of PM-CAD system which is described in 
 
 ### Preparation
 
-Download the checkpoints from BaiduYunPan with code ``.
-
-Then unzip
+Download the checkpoints from BaiduYunPan [[Link](https://pan.baidu.com/s/17LjzK6B2-di2tIQ-6aRVKQ)] with code `frnp`.
 
 ### Demo
 
