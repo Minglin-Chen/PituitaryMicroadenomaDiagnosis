@@ -41,7 +41,7 @@ cd DiagnosisModel
 sh experiment/panet/run_PANet.py
 ```
 
-To train other microadenomas diagnosis model:
+To train other microadenomas diagnosis models:
 
 ```shell
 cd DiagnosisModel

@@ -8,7 +8,7 @@ import torch
 from DetectionModel.model import model_provider as detection_model_provider
 from DiagnosisModel.model import model_provider as diagnosis_model_provider
 
-from utils import load_dicom_series, preprocessing_on_dicom, topk_boxes_from_detection
+from utils import load_dicom_series_4D, preprocessing_on_dicom_4D, topk_boxes_from_detection
 from utils import load_jpg_slices, preprocessing_on_slice, get_boxes_from_detection
 from utils import visualize_detection_result, visualize_box_result, visualize_patches
 
@@ -17,14 +17,16 @@ from utils import visualize_detection_result, visualize_box_result, visualize_pa
 def predict_on_dicom(directory, detection_model, diagnosis_model, visualization=False):
 
     # 1. safe load dicom data
-    image_np = load_dicom_series(directory, series_description='T1W_TSE_Dyn')
+    image_np = load_dicom_series_4D(directory, series_description='T1W_TSE_Dyn')
     assert isinstance(image_np, np.ndarray), directory
     # 2. preprocessing
-    image_np_list = preprocessing_on_dicom(image_np)
+    image_np_list = preprocessing_on_dicom_4D(image_np)
     # 3. detection
     # forward (saving GPU memory)
     proba_list = []
-    for image_np in [image_np_list[4:9], image_np_list[16:21], image_np_list[28:33]]:
+    for image_np in image_np_list:
+        ntime = image_np.shape[0]
+        image_np = image_np[ntime//2-2:ntime//2+3]
 
         image_tensor = torch.from_numpy(image_np)
         det_res = [detection_model([slice_tensor.cuda()])[0] for slice_tensor in image_tensor]

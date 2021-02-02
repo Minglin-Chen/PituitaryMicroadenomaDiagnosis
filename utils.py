@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from cv2 import cv2
 import SimpleITK as sitk
+import pydicom
 
 import torch
 
@@ -131,10 +132,77 @@ def load_dicom_series(directory, series_description='T1W_SE+C'):
             image_np = (image_np - window_lower) / (window_upper - window_lower) * 255
             image_np = image_np.astype(np.uint8)
 
-    for i in [0,1,3,4]:
-        image_np[i] = histogram_matching(image_np[i], image_np[2])
     image_np = image_np.astype(np.float32)
+    return image_np
 
+
+def load_dicom_series_4D(directory, series_description='T1W_SE+C'):
+    r"""
+    Load DICOM series with specific series description in 4D format
+    Refer to:
+        `https://simpleitk.org/doxygen/latest/html/Python_2DicomSeriesReader2_8py-example.html`
+        `https://simpleitk.org/SPIE2019_COURSE/02_images_and_resampling.html`
+        `http://dicom.nema.org/medical/dicom/current/output/pdf/part06.pdf`
+
+    Args:
+        directory: str, root to the DICOM series
+        series_description: str, 'T1W_SE+C' or 'T1W_TSE_Dyn'
+    Return:
+        None or numpy.ndarray (slice,time,x,y)
+    """
+    reader = sitk.ImageSeriesReader()
+    # setup for additional information loading
+    reader.MetaDataDictionaryArrayUpdateOn()
+    series = reader.GetGDCMSeriesIDs(directory)
+    # find the specific madality serie
+    image_np = None
+    for serie in series:
+        dicom_names = reader.GetGDCMSeriesFileNames(directory, serie)
+        if len(dicom_names):
+            # load
+            reader.SetFileNames(dicom_names)
+            image_sitk = reader.Execute()
+
+            # tag for Series Description: '0008|103E'
+            if series_description not in reader.GetMetaData(0, '0008|103e'): continue
+
+            # tag for Temporal Position Identifier: '0020|0100'
+            temporal_ind = [int(reader.GetMetaData(i,'0020|0100'))-1 for i in range(len(dicom_names))]
+            
+            # tag for Slice Location: '0020|1041'
+            slice_location = [float(reader.GetMetaData(i,'0020|1041')) for i in range(len(dicom_names))]
+            u = np.sort(np.unique(slice_location))
+            mapping = { k:v for v,k in enumerate(u) }
+            slice_ind = [ mapping[k] for k in slice_location ]
+
+            # convert to numpy.ndarray
+            image_np = sitk.GetArrayFromImage(image_sitk) # z, y, x
+            image_np = image_np.astype(np.float32)
+
+            # 3D -> 4D
+            image_4D = np.zeros((
+                np.max(slice_ind)+1,
+                np.max(temporal_ind)+1,
+                image_np.shape[1],
+                image_np.shape[2]))
+            assert image_4D.shape[0]*image_4D.shape[1] == image_np.shape[0]
+            for ind, plane in enumerate(image_np):
+                image_4D[slice_ind[ind],temporal_ind[ind]] = plane
+            image_np = image_4D
+            
+            # clip the intensity
+            # tag for Window Center: '(0028,1050)'
+            window_center = float(reader.GetMetaData(0, '0028|1050'))
+            # tag for Window Width: '(0028,1051)'
+            window_width = float(reader.GetMetaData(0, '0028|1051'))
+            window_lower = window_center - window_width / 2.0
+            window_upper = window_center + window_width / 2.0 
+
+            image_np = np.clip(image_np, window_lower, window_upper)
+            image_np = (image_np - window_lower) / (window_upper - window_lower) * 255
+            image_np = image_np.astype(np.uint8)
+
+    image_np = image_np.astype(np.float32)
     return image_np
 
 
@@ -202,12 +270,13 @@ def preprocessing_on_dicom(image_np):
     r"""
     Reisze to 256x256
     Args:
-        image_np: numpy.ndarray (Z,X,Y)
+        image_np: numpy.ndarray (nslice,ntime,nrow,ncol)
     Return:
-        image_np: numpy.ndarray (B,C,H,W)
+        image_np: numpy.ndarray (nslice,ntime,3,256,256)
     """
-    # resize
+    assert image_np.ndim == 3
     assert image_np.shape[1] == image_np.shape[2]
+    
     slices = []
     for slice_np in image_np:
         slice_np = cv2.resize(slice_np, (256,256))
@@ -216,9 +285,33 @@ def preprocessing_on_dicom(image_np):
         slices.append(slice_np)
     image_np = np.stack(slices)
     image_np = image_np / 256
-    
+        
     return image_np
 
+
+def preprocessing_on_dicom_4D(image_np):
+    r"""
+    Reisze to 256x256
+    Args:
+        image_np: numpy.ndarray (nslice,ntime,nrow,ncol)
+    Return:
+        image_np: numpy.ndarray (nslice,ntime,3,256,256)
+    """
+    assert image_np.ndim == 4
+    assert image_np.shape[2] == image_np.shape[3]
+    nslice, ntime, nrow, ncol = image_np.shape
+
+    image_np = image_np.reshape(nslice*ntime, nrow, ncol)
+    slices = []
+    for slice_np in image_np:
+        slice_np = cv2.resize(slice_np, (256,256))
+        slice_np = cv2.cvtColor(slice_np, cv2.COLOR_GRAY2BGR)
+        slice_np = slice_np.transpose((2,0,1))
+        slices.append(slice_np)
+    image_np = np.stack(slices)
+    image_np = image_np / 256
+    image_np = image_np.reshape(nslice, ntime, 3, 256, 256)
+    return image_np
 
 def preprocessing_on_slice(slices_np):
     r"""
